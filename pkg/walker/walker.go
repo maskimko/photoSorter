@@ -1,12 +1,13 @@
 package walker
 
 import (
-	"awesomeProject/pkg/metareader"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"photoSorter/pkg/deduplicator"
+	"photoSorter/pkg/metareader"
 	"strconv"
 	"strings"
 )
@@ -48,7 +49,8 @@ func convertSize(size string) (int64, error) {
 }
 
 type Walker struct {
-	MetaReader metareader.ExifReader
+	MetaReader   metareader.ExifReader
+	deduplicator *deduplicator.Deduplicator
 }
 
 func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, excludeExt []string) error {
@@ -72,7 +74,7 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 		return err
 	}
 
-	filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
 		var small bool
 		if err != nil {
 			log.Printf("%s walking error %s", path, err.Error())
@@ -105,32 +107,53 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 			return nil
 		}
 		finalDest := filepath.Join(finalDir, info.Name())
-		sFile, err := os.Open(path)
-		if err != nil {
-			log.Printf("failed to copy file %s %s", path, err)
-			return nil
-		}
-		defer sFile.Close()
-		dFile, err := os.Create(finalDest)
-		if err != nil {
-			log.Printf("failed to copy file to %s %s", finalDest, err)
-			return nil
-		}
-		defer dFile.Close()
-		_, err = io.Copy(dFile, sFile)
-		if err != nil {
-			log.Printf("failed to copy file from %s to %s  %s", path, finalDest, err)
-			return nil
-		}
-		if move {
-			err = os.Remove(path)
+		if !isTrash(path) {
+			fileInfo, err := w.deduplicator.AddFile(path)
 			if err != nil {
-				log.Printf("failed to remove source file %s %s", path, err)
-				return nil
+				if _, ok := err.(deduplicator.DuplicateError); ok {
+					log.Printf("file %s is a duplicate of %s, which has already been processed", path, fileInfo.Path)
+					return nil
+				}
+				log.Printf("failed to check duplicates of %s", path)
 			}
+		}
+		err = w.processFile(path, finalDest, move)
+		if err != nil {
+			log.Printf("failed to process file %s error %s", path, err)
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w Walker) processFile(src, dst string, move bool) error {
+	sFile, err := os.Open(src)
+	if err != nil {
+		log.Printf("failed to copy file %s %s", src, err)
+		return err
+	}
+	defer sFile.Close()
+	dFile, err := os.Create(dst)
+	if err != nil {
+		log.Printf("failed to copy file to %s %s", dst, err)
+		return err
+	}
+	defer dFile.Close()
+	_, err = io.Copy(dFile, sFile)
+	if err != nil {
+		log.Printf("failed to copy file from %s to %s  %s", src, dst, err)
+		return err
+	}
+	if move {
+		err = os.Remove(src)
+		if err != nil {
+			log.Printf("failed to remove source file %s %s", src, err)
+			return err
+		}
+	}
 	return nil
 }
 
@@ -145,7 +168,6 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
 		destRoot = filepath.Join(destRoot, "video")
 	default:
 		destRoot = filepath.Join(destRoot, "others")
-
 	}
 
 	if x == nil {
@@ -192,8 +214,8 @@ func isTrash(path string) bool {
 	return strings.Contains(path, ".dtrash")
 }
 
-func NewWalker(reader metareader.ExifReader) Walker {
-	return Walker{reader}
+func NewWalker(reader metareader.ExifReader, deduplicator *deduplicator.Deduplicator) Walker {
+	return Walker{reader, deduplicator}
 }
 
 func isExcluded(path string, dirs, extensions []string) bool {
@@ -228,4 +250,8 @@ func isPicture(path string) bool {
 		}
 	}
 	return false
+}
+
+func (w Walker) DuplicatesCount() int {
+	return w.deduplicator.DuplicatesCount()
 }
