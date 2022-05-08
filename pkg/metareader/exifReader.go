@@ -6,6 +6,7 @@ import (
 	"github.com/rwcarlsen/goexif/tiff"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -85,9 +86,17 @@ func ReadEXIFData(file *os.File) (*ExifMeta, error) {
 	} else {
 		coordinates = &GPSCoordinates{Latitude: float32(lat), Longitude: float32(long)}
 	}
+	makeStr := strings.TrimSpace(cameraMake.String())
+	if makeStr == "" {
+		makeStr = "no_make"
+	}
+	modelStr := strings.TrimSpace(model.String())
+	if modelStr == "" {
+		modelStr = "no_model"
+	}
 	exifMeta := ExifMeta{
-		Make:        cameraMake.String(),
-		Model:       model.String(),
+		Make:        makeStr,
+		Model:       modelStr,
 		Time:        tm,
 		Coordinates: coordinates,
 	}

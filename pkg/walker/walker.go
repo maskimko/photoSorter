@@ -193,7 +193,7 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
 		log.Printf("no exif data for %s", file)
 		return ""
 	}
-	finalDir := filepath.Join(destRoot, x.Make, x.Model, strconv.Itoa(x.Time.Year()), x.Time.Month().String())
+	finalDir := filepath.Join(destRoot, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Make, x.Model)
 	ensureDir(finalDir)
 	return finalDir
 }
