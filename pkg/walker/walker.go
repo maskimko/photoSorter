@@ -64,9 +64,10 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 		} else {
 			return err
 		}
-	}
-	if !destStat.IsDir() {
-		return fmt.Errorf("destination path %s must be a directory", dest)
+	} else {
+		if !destStat.IsDir() {
+			return fmt.Errorf("destination path %s must be a directory", dest)
+		}
 	}
 
 	threshold, err := convertSize(sizeThreshold)
