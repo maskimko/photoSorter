@@ -21,17 +21,27 @@ func main() {
 	viper.BindPFlags(pflag.CommandLine)
 	reader := metareader.NewDefaultExifReader()
 	deduper := deduplicator.NewDeduplicator()
-	w := walker.NewWalker(reader, deduper)
 	source := viper.GetString("source")
 	destination := viper.GetString("dest")
 	if destination == "" {
 		log.Fatalln("you must specify destination '-d' where to put sorted images")
 	}
+	sizeThreshold := viper.GetString("small")
+	threshold, err := walker.ConvertSize(sizeThreshold)
+	if err != nil {
+		log.Fatalf("wrong threshold size format %s", sizeThreshold)
+	}
+	registry, err := walker.NewFileRegistry(destination, threshold)
+	if err != nil {
+		log.Fatalf("failed to initialize registry %s", err)
+	}
+	defer registry.Close()
+	w := walker.NewWalker(reader, deduper, registry)
 	move := viper.GetBool("move")
 	excludeDirs := viper.GetStringSlice("exclude-dirs")
 	excludeExts := viper.GetStringSlice("exclude-exts")
-	sizeThreshold := viper.GetString("small")
-	err := w.Walk(source, destination, sizeThreshold, move, excludeDirs, excludeExts)
+
+	err = w.Walk(source, destination, sizeThreshold, move, excludeDirs, excludeExts)
 	if err != nil {
 		log.Fatalf("failed with an error %s", err)
 	}

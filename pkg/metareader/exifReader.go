@@ -54,7 +54,9 @@ func (e ExifAccumulator) Meta() map[string]string {
 func ReadEXIFData(file *os.File) (*ExifMeta, error) {
 	x, err := exif.Decode(file)
 	if err != nil {
-		log.Printf("EXIF decode error %s", err)
+		if err.Error() != "EOF" {
+			log.Printf("EXIF decode error %s %s", file.Name(), err)
+		}
 	}
 	if x == nil {
 		if err.Error() == "EOF" {
@@ -81,9 +83,13 @@ func ReadEXIFData(file *os.File) (*ExifMeta, error) {
 	}
 	var coordinates *GPSCoordinates
 	lat, long, err := x.LatLong()
-	if err != nil {
-		log.Printf("position of %s is not available error %s", file.Name(), err)
-	} else {
+	//Suppress the GPS EXIF errors
+	//if err != nil {
+	//	log.Printf("position of %s is not available error %s", file.Name(), err)
+	//} else {
+	//	coordinates = &GPSCoordinates{Latitude: float32(lat), Longitude: float32(long)}
+	//}
+	if err == nil {
 		coordinates = &GPSCoordinates{Latitude: float32(lat), Longitude: float32(long)}
 	}
 	makeStr := strings.TrimSpace(cameraMake.String())

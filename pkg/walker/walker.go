@@ -12,45 +12,10 @@ import (
 	"strings"
 )
 
-var videoExts []string = []string{".mp4", ".avi", ".mkv"}
-var picExts []string = []string{".jpg", ".jpeg", ".png", ".heic", ".bmp", ".tiff", ".gif"}
-
-func convertSize(size string) (int64, error) {
-	r := []rune(size)
-	suffix := r[len(r)-1:][0]
-	baseSizeStr := string(r[0 : len(r)-1])
-	bs, err := strconv.Atoi(baseSizeStr)
-	if err != nil {
-		return -1, err
-	}
-	baseSize := int64(bs)
-	switch suffix {
-	case 'K':
-		fallthrough
-	case 'k':
-		return baseSize * (1 << 10), nil
-	case 'M':
-		fallthrough
-	case 'm':
-		return baseSize * (2 << 10), nil
-	case 'G':
-		fallthrough
-	case 'g':
-		return baseSize * (3 << 10), nil
-	case 'T':
-		fallthrough
-	case 't':
-		return baseSize * (4 << 10), nil
-	default:
-		var s int
-		s, err = strconv.Atoi(size)
-		return int64(s), err
-	}
-}
-
 type Walker struct {
 	MetaReader   metareader.ExifReader
 	deduplicator *deduplicator.Deduplicator
+	registry     Registry
 }
 
 func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, excludeExt []string) error {
@@ -70,7 +35,7 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 		}
 	}
 
-	threshold, err := convertSize(sizeThreshold)
+	threshold, err := ConvertSize(sizeThreshold)
 	if err != nil {
 		return err
 	}
@@ -85,7 +50,7 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 			return nil
 		}
 		if info.IsDir() {
-			if info.Name() == ".thumbnails" {
+			if info.Name() == ".thumbnails" || info.Name() == ".videoThumbnails" {
 				log.Printf("skipping %s thumbnails directory", path)
 				return filepath.SkipDir
 			}
@@ -160,13 +125,17 @@ func (w Walker) processFile(src, dst string, move bool) error {
 
 func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
 	destRoot := dest
-	isPic := isPicture(file)
-	isVid := isVideo(file)
-	switch {
-	case isPic:
+	switch WhichMediaType(filepath.Ext(file)) {
+	case Photo:
 		destRoot = filepath.Join(destRoot, "pictures")
-	case isVid:
+	case Audio:
+		log.Printf("audio processing is not implemented")
+		destRoot = filepath.Join(destRoot, "audio")
+	case Video:
+		log.Printf("audio processing is not implemented")
 		destRoot = filepath.Join(destRoot, "video")
+	case Unknown:
+		fallthrough
 	default:
 		destRoot = filepath.Join(destRoot, "others")
 	}
@@ -215,8 +184,8 @@ func isTrash(path string) bool {
 	return strings.Contains(path, ".dtrash")
 }
 
-func NewWalker(reader metareader.ExifReader, deduplicator *deduplicator.Deduplicator) Walker {
-	return Walker{reader, deduplicator}
+func NewWalker(reader metareader.ExifReader, deduplicator *deduplicator.Deduplicator, registry Registry) Walker {
+	return Walker{reader, deduplicator, registry}
 }
 
 func isExcluded(path string, dirs, extensions []string) bool {
@@ -227,26 +196,6 @@ func isExcluded(path string, dirs, extensions []string) bool {
 	}
 	for _, ext := range extensions {
 		if filepath.Ext(path) == ext {
-			return true
-		}
-	}
-	return false
-}
-
-func isVideo(path string) bool {
-	extension := filepath.Ext(path)
-	for _, ext := range videoExts {
-		if extension == strings.ToLower(ext) {
-			return true
-		}
-	}
-	return false
-}
-
-func isPicture(path string) bool {
-	extension := filepath.Ext(path)
-	for _, ext := range picExts {
-		if extension == strings.ToLower(ext) {
 			return true
 		}
 	}
