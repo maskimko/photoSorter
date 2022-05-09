@@ -84,9 +84,16 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 			}
 		}
 		err = w.processFile(path, finalDest, move)
+
 		if err != nil {
 			log.Printf("failed to process file %s error %s", path, err)
 		}
+		go func() {
+			err = w.registry.Add(finalDest, x)
+			if err != nil {
+				log.Printf("failed to register file %s error %s", finalDest, err)
+			}
+		}()
 		return nil
 	})
 	if err != nil {
