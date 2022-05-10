@@ -18,7 +18,10 @@ func main() {
 	pflag.StringArray("exclude-dirs", nil, "exclude specified directories")
 	pflag.StringArray("exclude-exts", []string{".gz", ".bz2", ".xz", ".tar", ".zip"}, "exclude files with given extensions")
 	pflag.Parse()
-	viper.BindPFlags(pflag.CommandLine)
+	err := viper.BindPFlags(pflag.CommandLine)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	reader := metareader.NewDefaultExifReader()
 	deduper := deduplicator.NewDeduplicator()
 	source := viper.GetString("source")
