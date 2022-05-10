@@ -18,7 +18,8 @@ type Walker struct {
 	registry     Registry
 }
 
-func (w Walker) Walk(sources []string, dest, sizeThreshold string, move bool, excludeDir, excludeExt []string) error {
+func (w Walker) Walk(sources []string, dest, sizeThreshold string, move,
+	skipUnknown bool, excludeDir, excludeExt []string) error {
 	destStat, err := os.Stat(dest)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -72,6 +73,10 @@ func (w Walker) Walk(sources []string, dest, sizeThreshold string, move bool, ex
 			finalDir := getDestDir(x, path, dest, small)
 			if finalDir == "" {
 				log.Printf("no exif data for %s, skipping...", path)
+				return nil
+			}
+			// skip unknown files if the flag is set
+			if x.Unknown && skipUnknown {
 				return nil
 			}
 			finalDest := filepath.Join(finalDir, info.Name())
