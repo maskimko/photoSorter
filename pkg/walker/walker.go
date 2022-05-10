@@ -18,7 +18,7 @@ type Walker struct {
 	registry     Registry
 }
 
-func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, excludeExt []string) error {
+func (w Walker) Walk(sources []string, dest, sizeThreshold string, move bool, excludeDir, excludeExt []string) error {
 	destStat, err := os.Stat(dest)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -40,64 +40,68 @@ func (w Walker) Walk(source, dest, sizeThreshold string, move bool, excludeDir, 
 		return err
 	}
 
-	err = filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		var small bool
-		if err != nil {
-			log.Printf("%s walking error %s", path, err.Error())
-		}
-		if isExcluded(path, excludeDir, excludeExt) {
-			log.Printf("excluded skipping %s", path)
-			return nil
-		}
-		if info.IsDir() {
-			if info.Name() == ".thumbnails" || info.Name() == ".videoThumbnails" {
-				log.Printf("skipping %s thumbnails directory", path)
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if isThumbnail(path) {
-			log.Printf("skipping thumbnail %s", path)
-			return nil
-		}
-		if info.Size() < threshold {
-			small = true
-		}
-		x, err := w.MetaReader.ReadEXIF(path)
-		if err != nil {
-			log.Printf("%s exif reading error %s", path, err)
-		}
-		finalDir := getDestDir(x, path, dest, small)
-		if finalDir == "" {
-			log.Printf("no exif data for %s, skipping...", path)
-			return nil
-		}
-		finalDest := filepath.Join(finalDir, info.Name())
-		if !isTrash(path) {
-			fileInfo, err := w.deduplicator.AddFile(path)
+	for _, source := range sources {
+		log.Printf("processing source directory %s", source)
+		err = filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+			var small bool
 			if err != nil {
-				if _, ok := err.(deduplicator.DuplicateError); ok {
-					log.Printf("file %s is a duplicate of %s, which has already been processed", path, fileInfo.Path)
-					return nil
+				log.Printf("%s walking error %s", path, err.Error())
+			}
+			if isExcluded(path, excludeDir, excludeExt) {
+				log.Printf("excluded skipping %s", path)
+				return nil
+			}
+			if info.IsDir() {
+				if info.Name() == ".thumbnails" || info.Name() == ".videoThumbnails" {
+					log.Printf("skipping %s thumbnails directory", path)
+					return filepath.SkipDir
 				}
-				log.Printf("failed to check duplicates of %s", path)
+				return nil
 			}
-		}
-		err = w.processFile(path, finalDest, move)
-
-		if err != nil {
-			log.Printf("failed to process file %s error %s", path, err)
-		}
-		go func() {
-			err = w.registry.Add(finalDest, x)
+			if isThumbnail(path) {
+				log.Printf("skipping thumbnail %s", path)
+				return nil
+			}
+			if info.Size() < threshold {
+				small = true
+			}
+			x, err := w.MetaReader.ReadEXIF(path)
 			if err != nil {
-				log.Printf("failed to register file %s error %s", finalDest, err)
+				log.Printf("%s exif reading error %s", path, err)
 			}
-		}()
-		return nil
-	})
-	if err != nil {
-		return err
+			finalDir := getDestDir(x, path, dest, small)
+			if finalDir == "" {
+				log.Printf("no exif data for %s, skipping...", path)
+				return nil
+			}
+			finalDest := filepath.Join(finalDir, info.Name())
+			if !isTrash(path) {
+				fileInfo, err := w.deduplicator.AddFile(path)
+				if err != nil {
+					if _, ok := err.(deduplicator.DuplicateError); ok {
+						log.Printf("file %s is a duplicate of %s, which has already been processed", path, fileInfo.Path)
+						return nil
+					} else {
+						log.Printf("failed to check duplicates of %s", path)
+					}
+				}
+			}
+			err = w.processFile(path, finalDest, move)
+
+			if err != nil {
+				log.Printf("failed to process file %s error %s", path, err)
+			}
+			go func() {
+				err = w.registry.Add(finalDest, x)
+				if err != nil {
+					log.Printf("failed to register file %s error %s", finalDest, err)
+				}
+			}()
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
