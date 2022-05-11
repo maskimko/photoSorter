@@ -19,7 +19,7 @@ type Walker struct {
 }
 
 func (w Walker) Walk(sources []string, dest, sizeThreshold string, move,
-	skipUnknown bool, excludeDir, excludeExt []string) error {
+	skipUnsupported bool, excludeDir, excludeExt []string) error {
 	destStat, err := os.Stat(dest)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -70,13 +70,12 @@ func (w Walker) Walk(sources []string, dest, sizeThreshold string, move,
 			if err != nil {
 				log.Printf("%s exif reading error %s", path, err)
 			}
-			finalDir := getDestDir(x, path, dest, small)
-			if finalDir == "" {
-				log.Printf("no exif data for %s, skipping...", path)
+			finalDir, skip := getDestDir(x, path, dest, small, skipUnsupported)
+			if skip {
 				return nil
 			}
-			// skip unknown files if the flag is set
-			if x.Unknown && skipUnknown {
+			if finalDir == "" {
+				log.Printf("no exif data for %s, skipping...", path)
 				return nil
 			}
 			finalDest := filepath.Join(finalDir, info.Name())
@@ -139,7 +138,7 @@ func (w Walker) processFile(src, dst string, move bool) error {
 	return nil
 }
 
-func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
+func getDestDir(x *metareader.ExifMeta, file, dest string, small, skipUnsupported bool) (string, bool) {
 	destRoot := dest
 	switch WhichMediaType(filepath.Ext(file)) {
 	case Photo:
@@ -150,7 +149,10 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
 	case Video:
 		log.Printf("audio processing is not implemented")
 		destRoot = filepath.Join(destRoot, "video")
-	case Unknown:
+	case Unsupported:
+		if skipUnsupported {
+			return filepath.Join(destRoot, "others"), true
+		}
 		fallthrough
 	default:
 		destRoot = filepath.Join(destRoot, "others")
@@ -159,12 +161,12 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
 	if x == nil {
 		noDataDir := filepath.Join(dest, "no-data")
 		ensureDir(noDataDir)
-		return noDataDir
+		return noDataDir, false
 	}
 	if isTrash(file) {
 		trashDir := filepath.Join(dest, "trash")
 		ensureDir(trashDir)
-		return trashDir
+		return trashDir, false
 	}
 	if small {
 		destRoot = filepath.Join(dest, "small")
@@ -172,15 +174,15 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small bool) string {
 	if x.Unknown {
 		unknownDir := filepath.Join(destRoot, "unknown")
 		ensureDir(unknownDir)
-		return unknownDir
+		return unknownDir, false
 	}
 	if x == nil {
 		log.Printf("no exif data for %s", file)
-		return ""
+		return "", skipUnsupported
 	}
 	finalDir := filepath.Join(destRoot, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Make, x.Model)
 	ensureDir(finalDir)
-	return finalDir
+	return finalDir, false
 }
 
 func ensureDir(finalDir string) {

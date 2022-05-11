@@ -5,7 +5,7 @@ import "strings"
 type MediaType uint8
 
 const (
-	Unknown = iota
+	Unsupported = iota
 	Photo
 	Video
 	Audio
@@ -44,9 +44,13 @@ func (m MediaType) IsAudio() bool {
 	return m == Audio
 }
 
+func (m MediaType) IsUnknown() bool {
+	return m == Unsupported
+}
+
 func WhichMediaType(ext string) MediaType {
 	if mt, ok := Ext2MediaType[strings.ToLower(ext)]; ok {
 		return mt
 	}
-	return Unknown
+	return Unsupported
 }

@@ -18,7 +18,7 @@ func main() {
 	pflag.BoolP("move", "m", false, "if specified, photos will be moved, and originals will be removed")
 	pflag.StringArray("exclude-dirs", nil, "exclude specified directories")
 	pflag.StringArray("exclude-exts", []string{".gz", ".bz2", ".xz", ".tar", ".zip"}, "exclude files with given extensions")
-	pflag.BoolP("skip-unknown", "U", false, "do not copy unknown files")
+	pflag.BoolP("skip-unsupported", "U", false, "do not copy unsupported files")
 	pflag.Parse()
 	err := viper.BindPFlags(pflag.CommandLine)
 	if err != nil {
@@ -53,8 +53,8 @@ func main() {
 	move := viper.GetBool("move")
 	excludeDirs := viper.GetStringSlice("exclude-dirs")
 	excludeExts := viper.GetStringSlice("exclude-exts")
-	skipUnknown := viper.GetBool("skip-unknown")
-	err = w.Walk(sources, destination, sizeThreshold, move, skipUnknown, excludeDirs, excludeExts)
+	skipUnsupported := viper.GetBool("skip-unsupported")
+	err = w.Walk(sources, destination, sizeThreshold, move, skipUnsupported, excludeDirs, excludeExts)
 	if err != nil {
 		log.Fatalf("failed with an error %s", err)
 	}
