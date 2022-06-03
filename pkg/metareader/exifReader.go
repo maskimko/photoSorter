@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/rwcarlsen/goexif/exif"
 	"github.com/rwcarlsen/goexif/tiff"
+	"image"
 	"log"
 	"os"
 	"strings"
@@ -23,6 +24,10 @@ type ExifMeta struct {
 	Coordinates *GPSCoordinates
 	Records     map[string]string
 	Unknown     bool
+	Thumbnail   bool
+	Height      int
+	Width       int
+	Format      string
 }
 
 type ExifReader interface {
@@ -117,7 +122,26 @@ func (e ExifReaderImpl) ReadEXIF(file string) (*ExifMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ReadEXIFData(f)
+	data, err := ReadEXIFData(f)
+	if err != nil {
+		return nil, err
+	}
+	h, w, format, err := e.decode(f)
+	if err != nil {
+		return data, err
+	}
+	data.Height = h
+	data.Width = w
+	data.Format = format
+	return data, nil
+}
+
+func (e ExifReaderImpl) decode(file *os.File) (int, int, string, error) {
+	config, f, err := image.DecodeConfig(file)
+	if err != nil {
+		return -1, -1, "", err
+	}
+	return config.Height, config.Width, f, nil
 }
 
 func NewDefaultExifReader() ExifReader {

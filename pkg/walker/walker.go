@@ -16,9 +16,67 @@ type Walker struct {
 	MetaReader   metareader.ExifReader
 	deduplicator *deduplicator.Deduplicator
 	registry     Registry
+	sizeTreshold int64
 }
 
-func (w Walker) Walk(sources []string, dest, sizeThreshold string, move,
+const (
+	TINYRES  = 384
+	THUMBRES = 256
+	SMALLRES = 768
+	MEDIRES  = 2560
+)
+
+type PicSize int
+
+const (
+	Unknown           = -1
+	Thumbnail PicSize = iota
+	Tiny
+	Small
+	Medium
+	Large
+)
+
+func GetSizeName(ps PicSize) string {
+	switch ps {
+	case Thumbnail:
+		return "thumbnail"
+	case Tiny:
+		return "tiny"
+	case Small:
+		return "small"
+	case Medium:
+		return "medium"
+	case Large:
+		return "large"
+	default:
+		return "unknown"
+	}
+}
+
+func (w Walker) whichSize(x *metareader.ExifMeta, size int64) PicSize {
+	if x.Width > MEDIRES && x.Height > MEDIRES {
+		return Large
+	}
+	if x.Width > SMALLRES && x.Height > SMALLRES {
+		return MEDIRES
+	}
+	if x.Height > TINYRES && x.Width > TINYRES {
+		return Small
+	}
+	if x.Height <= TINYRES && x.Height == x.Width {
+		return Thumbnail
+	}
+	if x.Height <= 0 || x.Width <= 0 {
+		if size < w.sizeTreshold {
+			return Small
+		}
+		return Unknown
+	}
+	return Tiny
+}
+
+func (w Walker) Walk(sources []string, dest string, move,
 	skipUnsupported bool, excludeDir, excludeExt []string) error {
 	destStat, err := os.Stat(dest)
 	if err != nil {
@@ -36,15 +94,9 @@ func (w Walker) Walk(sources []string, dest, sizeThreshold string, move,
 		}
 	}
 
-	threshold, err := ConvertSize(sizeThreshold)
-	if err != nil {
-		return err
-	}
-
 	for _, source := range sources {
 		log.Printf("processing source directory %s", source)
 		err = filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-			var small bool
 			if err != nil {
 				log.Printf("%s walking error %s", path, err.Error())
 			}
@@ -63,14 +115,12 @@ func (w Walker) Walk(sources []string, dest, sizeThreshold string, move,
 				log.Printf("skipping thumbnail %s", path)
 				return nil
 			}
-			if info.Size() < threshold {
-				small = true
-			}
 			x, err := w.MetaReader.ReadEXIF(path)
 			if err != nil {
 				log.Printf("%s exif reading error %s", path, err)
 			}
-			finalDir, skip := getDestDir(x, path, dest, small, skipUnsupported)
+
+			finalDir, skip := w.getDestDir(x, path, dest, info.Size(), skipUnsupported)
 			if skip {
 				return nil
 			}
@@ -138,7 +188,7 @@ func (w Walker) processFile(src, dst string, move bool) error {
 	return nil
 }
 
-func getDestDir(x *metareader.ExifMeta, file, dest string, small, skipUnsupported bool) (string, bool) {
+func (w Walker) getDestDir(x *metareader.ExifMeta, file, dest string, size int64, skipUnsupported bool) (string, bool) {
 	destRoot := dest
 	switch WhichMediaType(filepath.Ext(file)) {
 	case Photo:
@@ -168,7 +218,8 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small, skipUnsupporte
 		ensureDir(trashDir)
 		return trashDir, false
 	}
-	if small {
+
+	if w.isSmall(x, size) {
 		destRoot = filepath.Join(dest, "small")
 	}
 	if x.Unknown {
@@ -180,7 +231,8 @@ func getDestDir(x *metareader.ExifMeta, file, dest string, small, skipUnsupporte
 		log.Printf("no exif data for %s", file)
 		return "", skipUnsupported
 	}
-	finalDir := filepath.Join(destRoot, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Make, x.Model)
+	//TODO: for audio and video here should be a different paths
+	finalDir := filepath.Join(destRoot, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Format, x.Make, x.Model)
 	ensureDir(finalDir)
 	return finalDir, false
 }
@@ -199,11 +251,15 @@ func isThumbnail(path string) bool {
 }
 
 func isTrash(path string) bool {
-	return strings.Contains(path, ".dtrash")
+	return strings.Contains(path, ".dtrash") || strings.Contains(path, ".trash")
 }
 
-func NewWalker(reader metareader.ExifReader, deduplicator *deduplicator.Deduplicator, registry Registry) Walker {
-	return Walker{reader, deduplicator, registry}
+func NewWalker(reader metareader.ExifReader, deduplicator *deduplicator.Deduplicator, registry Registry, sizeThreshold string) Walker {
+	threshold, err := ConvertSize(sizeThreshold)
+	if err != nil {
+		log.Fatalf("cannot convert size %s %s", sizeThreshold, err)
+	}
+	return Walker{reader, deduplicator, registry, threshold}
 }
 
 func isExcluded(path string, dirs, extensions []string) bool {
