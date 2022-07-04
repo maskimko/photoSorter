@@ -59,7 +59,7 @@ func (w Walker) whichSize(x *metareader.ExifMeta, size int64) PicSize {
 		return Large
 	}
 	if x.Width > SMALLRES && x.Height > SMALLRES {
-		return MEDIRES
+		return Medium
 	}
 	if x.Height > TINYRES && x.Width > TINYRES {
 		return Small
@@ -68,6 +68,7 @@ func (w Walker) whichSize(x *metareader.ExifMeta, size int64) PicSize {
 		return Thumbnail
 	}
 	if x.Height <= 0 || x.Width <= 0 {
+		//If cannot read the picture data consider size of the file then
 		if size < w.sizeTreshold {
 			return Small
 		}
@@ -119,8 +120,8 @@ func (w Walker) Walk(sources []string, dest string, move,
 			if err != nil {
 				log.Printf("%s exif reading error %s", path, err)
 			}
-
-			finalDir, skip := w.getDestDir(x, path, dest, info.Size(), skipUnsupported)
+			picSize := w.whichSize(x, info.Size())
+			finalDir, skip := w.getDestDir(x, path, dest, picSize, skipUnsupported)
 			if skip {
 				return nil
 			}
@@ -146,7 +147,7 @@ func (w Walker) Walk(sources []string, dest string, move,
 				log.Printf("failed to process file %s error %s", path, err)
 			}
 			go func() {
-				err = w.registry.Add(finalDest, x)
+				err = w.registry.Add(finalDest, picSize)
 				if err != nil {
 					log.Printf("failed to register file %s error %s", finalDest, err)
 				}
@@ -188,7 +189,7 @@ func (w Walker) processFile(src, dst string, move bool) error {
 	return nil
 }
 
-func (w Walker) getDestDir(x *metareader.ExifMeta, file, dest string, size int64, skipUnsupported bool) (string, bool) {
+func (w Walker) getDestDir(x *metareader.ExifMeta, file, dest string, picSize PicSize, skipUnsupported bool) (string, bool) {
 	destRoot := dest
 	switch WhichMediaType(filepath.Ext(file)) {
 	case Photo:
@@ -218,10 +219,8 @@ func (w Walker) getDestDir(x *metareader.ExifMeta, file, dest string, size int64
 		ensureDir(trashDir)
 		return trashDir, false
 	}
+	destRoot = filepath.Join(GetSizeName(picSize))
 
-	if w.isSmall(x, size) {
-		destRoot = filepath.Join(dest, "small")
-	}
 	if x.Unknown {
 		unknownDir := filepath.Join(destRoot, "unknown")
 		ensureDir(unknownDir)

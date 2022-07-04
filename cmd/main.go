@@ -1,14 +1,17 @@
 package main
 
 import (
-	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 	"log"
 	"os"
 	"photoSorter/pkg/deduplicator"
 	"photoSorter/pkg/metareader"
 	"photoSorter/pkg/walker"
+
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
+
+const SMALLISUNDER = "200k"
 
 func main() {
 	pflag.StringSliceP("sources", "s", nil, "source directories where to scan photos, can be repeated")
@@ -39,22 +42,18 @@ func main() {
 	if destination == "" {
 		log.Fatalln("you must specify destination '-d' where to put sorted images")
 	}
-	sizeThreshold := viper.GetString("filter-small")
-	threshold, err := walker.ConvertSize(sizeThreshold)
-	if err != nil {
-		log.Fatalf("wrong threshold size format %s", sizeThreshold)
-	}
-	registry, err := walker.NewFileRegistry(destination, threshold)
+
+	registry, err := walker.NewFileRegistry(destination)
 	if err != nil {
 		log.Fatalf("failed to initialize registry %s", err)
 	}
 	defer registry.Close()
-	w := walker.NewWalker(reader, deduper, registry)
+	w := walker.NewWalker(reader, deduper, registry, SMALLISUNDER)
 	move := viper.GetBool("move")
 	excludeDirs := viper.GetStringSlice("exclude-dirs")
 	excludeExts := viper.GetStringSlice("exclude-exts")
 	skipUnsupported := viper.GetBool("skip-unsupported")
-	err = w.Walk(sources, destination, sizeThreshold, move, skipUnsupported, excludeDirs, excludeExts)
+	err = w.Walk(sources, destination, move, skipUnsupported, excludeDirs, excludeExts)
 	if err != nil {
 		log.Fatalf("failed with an error %s", err)
 	}

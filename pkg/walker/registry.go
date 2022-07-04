@@ -5,49 +5,42 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"photoSorter/pkg/metareader"
 )
 
 type Registry interface {
 	io.Closer
-	Add(path string, info *metareader.ExifMeta) error
+	Add(path string, picSize PicSize) error
 }
 
 type FileRegistry struct {
-	threshold  int64
-	smallFile  *os.File
-	noDataFile *os.File
+	files map[PicSize]*os.File
+}
+
+func getRegistryFilename(p PicSize) string {
+	size := fmt.Sprintf("%s.txt", GetSizeName(p))
+	return size
 }
 
 func (f FileRegistry) Close() error {
-	if f.smallFile != nil {
-		err := f.smallFile.Close()
-		if err != nil {
-			return err
-		}
-	}
-	if f.noDataFile != nil {
-		err := f.noDataFile.Close()
-		if err != nil {
-			return err
+	for _, v := range f.files {
+		if v != nil {
+			err := v.Close()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func (f FileRegistry) Add(path string, info *metareader.ExifMeta) error {
-	if info == nil || info.Unknown {
-		_, err := fmt.Fprintln(f.noDataFile, path)
-		if err != nil {
-			return err
-		}
-	}
+func (f FileRegistry) Add(path string, picSize PicSize) error {
+
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	if !fi.IsDir() && fi.Size() < f.threshold {
-		_, err = fmt.Fprintln(f.smallFile, path)
+	if !fi.IsDir() {
+		_, err = fmt.Fprintln(f.files[picSize], path)
 		if err != nil {
 			return err
 		}
@@ -55,23 +48,25 @@ func (f FileRegistry) Add(path string, info *metareader.ExifMeta) error {
 	return nil
 }
 
-func NewFileRegistry(dir string, threshold int64) (Registry, error) {
-	fr := FileRegistry{threshold: threshold}
+func NewFileRegistry(dir string) (Registry, error) {
+	fr := FileRegistry{}
+	fr.files = make(map[PicSize]*os.File)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err = os.MkdirAll(dir, 0775)
 		if err != nil {
 			return nil, err
 		}
 	}
-	noDataFile, err := os.OpenFile(filepath.Join(dir, "no_data_file.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
-	if err != nil {
-		return nil, err
+	for i := -1; i <= 5; i++ {
+		if i == 0 {
+			continue
+		}
+		p := PicSize(i)
+		f, err := os.OpenFile(filepath.Join(dir, getRegistryFilename(p)), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
+		if err != nil {
+			return nil, err
+		}
+		fr.files[p] = f
 	}
-	smallFile, err := os.OpenFile(filepath.Join(dir, "small_file.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
-	if err != nil {
-		return nil, err
-	}
-	fr.noDataFile = noDataFile
-	fr.smallFile = smallFile
 	return &fr, nil
 }
