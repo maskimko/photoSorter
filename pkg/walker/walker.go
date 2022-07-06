@@ -7,78 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"photoSorter/pkg/deduplicator"
-	"photoSorter/pkg/metareader"
-	"strconv"
 	"strings"
 )
 
 type Walker struct {
-	MetaReader   metareader.ExifReader
+	pw           *PhotoWorker
 	deduplicator *deduplicator.Deduplicator
 	registry     Registry
-	sizeTreshold int64
 }
 
-const (
-	TINYRES  = 384
-	THUMBRES = 256
-	SMALLRES = 768
-	MEDIRES  = 2560
-)
-
-type PicSize int
-
-const (
-	Unknown           = -1
-	Thumbnail PicSize = iota
-	Tiny
-	Small
-	Medium
-	Large
-)
-
-func GetSizeName(ps PicSize) string {
-	switch ps {
-	case Thumbnail:
-		return "thumbnail"
-	case Tiny:
-		return "tiny"
-	case Small:
-		return "small"
-	case Medium:
-		return "medium"
-	case Large:
-		return "large"
-	default:
-		return "unknown"
-	}
-}
-
-func (w Walker) whichSize(x *metareader.ExifMeta, size int64) PicSize {
-	if x.Width > MEDIRES && x.Height > MEDIRES {
-		return Large
-	}
-	if x.Width > SMALLRES && x.Height > SMALLRES {
-		return Medium
-	}
-	if x.Height > TINYRES && x.Width > TINYRES {
-		return Small
-	}
-	if x.Height <= TINYRES && x.Height == x.Width {
-		return Thumbnail
-	}
-	if x.Height <= 0 || x.Width <= 0 {
-		//If cannot read the picture data consider size of the file then
-		if size < w.sizeTreshold {
-			return Small
-		}
-		return Unknown
-	}
-	return Tiny
-}
-
-func (w Walker) Walk(sources []string, dest string, move,
-	skipUnsupported bool, excludeDir, excludeExt []string) error {
+func (w Walker) Walk(sources []string, dest string, move, skipUnsupported bool, excludeDir, excludeExt []string) error {
 	destStat, err := os.Stat(dest)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -116,13 +54,10 @@ func (w Walker) Walk(sources []string, dest string, move,
 				log.Printf("skipping thumbnail %s", path)
 				return nil
 			}
-			x, err := w.MetaReader.ReadEXIF(path)
-			if err != nil {
-				log.Printf("%s exif reading error %s", path, err)
-			}
-			picSize := w.whichSize(x, info.Size())
-			finalDir, skip := w.getDestDir(x, path, dest, picSize, skipUnsupported)
+
+			finalDir, skip := w.getDestDir(path, dest, info)
 			if skip {
+				log.Printf("skip %s", path)
 				return nil
 			}
 			if finalDir == "" {
@@ -142,16 +77,10 @@ func (w Walker) Walk(sources []string, dest string, move,
 				}
 			}
 			err = w.processFile(path, finalDest, move)
-
 			if err != nil {
 				log.Printf("failed to process file %s error %s", path, err)
 			}
-			go func() {
-				err = w.registry.Add(finalDest, picSize)
-				if err != nil {
-					log.Printf("failed to register file %s error %s", finalDest, err)
-				}
-			}()
+
 			return nil
 		})
 		if err != nil {
@@ -189,11 +118,29 @@ func (w Walker) processFile(src, dst string, move bool) error {
 	return nil
 }
 
-func (w Walker) getDestDir(x *metareader.ExifMeta, file, dest string, picSize PicSize, skipUnsupported bool) (string, bool) {
+func (w Walker) getDestDir(file, dest string, info os.FileInfo) (string, bool) {
 	destRoot := dest
+	if isTrash(file) {
+		trashDir := filepath.Join(dest, "trash")
+		ensureDir(trashDir)
+		return trashDir, false
+	}
+
 	switch WhichMediaType(filepath.Ext(file)) {
 	case Photo:
-		destRoot = filepath.Join(destRoot, "pictures")
+		picPath, picSize, err := w.pw.GetPath(file, info)
+		if err != nil {
+			log.Printf("skipping %s error: %s", file, err)
+			return filepath.Join(destRoot, "others"), true
+		}
+		finalDest := filepath.Join(dest, picPath)
+		go func() {
+			err = w.registry.Add(finalDest, picSize)
+			if err != nil {
+				log.Printf("failed to register file %s error %s", finalDest, err)
+			}
+		}()
+		return finalDest, false
 	case Audio:
 		log.Printf("audio processing is not implemented")
 		destRoot = filepath.Join(destRoot, "audio")
@@ -201,48 +148,29 @@ func (w Walker) getDestDir(x *metareader.ExifMeta, file, dest string, picSize Pi
 		log.Printf("audio processing is not implemented")
 		destRoot = filepath.Join(destRoot, "video")
 	case Unsupported:
-		if skipUnsupported {
-			return filepath.Join(destRoot, "others"), true
-		}
+		log.Printf("unsupported file %s goes to others", file)
 		fallthrough
 	default:
 		destRoot = filepath.Join(destRoot, "others")
 	}
 
-	if x == nil {
-		noDataDir := filepath.Join(dest, "no-data")
-		ensureDir(noDataDir)
-		return noDataDir, false
-	}
-	if isTrash(file) {
-		trashDir := filepath.Join(dest, "trash")
-		ensureDir(trashDir)
-		return trashDir, false
-	}
-	destRoot = filepath.Join(GetSizeName(picSize))
-
-	if x.Unknown {
-		unknownDir := filepath.Join(destRoot, "unknown")
-		ensureDir(unknownDir)
-		return unknownDir, false
-	}
-	if x == nil {
-		log.Printf("no exif data for %s", file)
-		return "", skipUnsupported
-	}
 	//TODO: for audio and video here should be a different paths
-	finalDir := filepath.Join(destRoot, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Format, x.Make, x.Model)
-	ensureDir(finalDir)
-	return finalDir, false
+	return destRoot, false
 }
 
-func ensureDir(finalDir string) {
+func ensureDir(finalDir string) error {
 	if _, err := os.Stat(finalDir); os.IsNotExist(err) {
 		err = os.MkdirAll(finalDir, 0755)
 		if err != nil {
 			log.Printf("failed to create directory %s", finalDir)
+			return err
+		}
+	} else {
+		if err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 func isThumbnail(path string) bool {
@@ -253,12 +181,9 @@ func isTrash(path string) bool {
 	return strings.Contains(path, ".dtrash") || strings.Contains(path, ".trash")
 }
 
-func NewWalker(reader metareader.ExifReader, deduplicator *deduplicator.Deduplicator, registry Registry, sizeThreshold string) Walker {
-	threshold, err := ConvertSize(sizeThreshold)
-	if err != nil {
-		log.Fatalf("cannot convert size %s %s", sizeThreshold, err)
-	}
-	return Walker{reader, deduplicator, registry, threshold}
+func NewWalker(pw *PhotoWorker, deduplicator *deduplicator.Deduplicator, registry Registry) Walker {
+
+	return Walker{pw, deduplicator, registry}
 }
 
 func isExcluded(path string, dirs, extensions []string) bool {
