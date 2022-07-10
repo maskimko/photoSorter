@@ -38,6 +38,9 @@ func (w Walker) Walk(sources []string, dest string, move, skipUnsupported bool, 
 		err = filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				log.Printf("%s walking error %s", path, err.Error())
+				if os.IsNotExist(err) {
+					return err
+				}
 			}
 			if isExcluded(path, excludeDir, excludeExt) {
 				log.Printf("excluded skipping %s", path)
@@ -63,6 +66,11 @@ func (w Walker) Walk(sources []string, dest string, move, skipUnsupported bool, 
 			if finalDir == "" {
 				log.Printf("no exif data for %s, skipping...", path)
 				return nil
+			}
+			err = ensureDir(finalDir)
+			if err != nil {
+				log.Printf("failed to create a destination directory %s", err)
+				return err
 			}
 			finalDest := filepath.Join(finalDir, info.Name())
 			if !isTrash(path) {

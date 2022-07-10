@@ -11,7 +11,7 @@ import (
 
 //Available suffixes are K,M,G,T for kilobyte, megabyte, gigabyte, terabyte respectively
 const SMALLISUNDER = "200k"
-
+const NOTIME = "unknown_time"
 const (
 	TINYRES  = 384
 	THUMBRES = 256
@@ -123,8 +123,6 @@ func (pw PhotoWorker) GetPath(filePath string, fileInfo os.FileInfo) (string, Pi
 	picSize, x, err := pw.GetPicInfo(filePath, fileInfo)
 	if err != nil {
 		log.Printf("failed to measure picture %s size %s", filePath, err)
-		// noDataDir := filepath.Join(pictures, "no-data")
-		// ensureDir(noDataDir)
 		return "no-data", Unknown, err
 	}
 	if x.Unknown {
@@ -133,7 +131,11 @@ func (pw PhotoWorker) GetPath(filePath string, fileInfo os.FileInfo) (string, Pi
 		return unknownDir, Unknown, nil
 	}
 	pictures = filepath.Join(pictures, GetPhotoSizeName(picSize))
-	finalDir := filepath.Join(pictures, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Format, x.Make, x.Model)
-	err = ensureDir(finalDir)
+	var finalDir string
+	if x.Time == nil {
+		finalDir = filepath.Join(pictures, NOTIME, x.Format, x.Make, x.Model)
+	} else {
+		finalDir = filepath.Join(pictures, strconv.Itoa(x.Time.Year()), x.Time.Month().String(), x.Format, x.Make, x.Model)
+	}
 	return finalDir, picSize, err
 }

@@ -2,13 +2,22 @@ package metareader
 
 import (
 	"fmt"
-	"github.com/rwcarlsen/goexif/exif"
-	"github.com/rwcarlsen/goexif/tiff"
-	"image"
+	"image/jpeg"
+	"image/png"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rwcarlsen/goexif/exif"
+	"github.com/rwcarlsen/goexif/tiff"
+)
+
+const (
+	NOMAKE  = "unknown_make"
+	NOMODEL = "unknown_model"
 )
 
 type GPSCoordinates struct {
@@ -20,7 +29,7 @@ type GPSCoordinates struct {
 type ExifMeta struct {
 	Make        string
 	Model       string
-	Time        time.Time
+	Time        *time.Time
 	Coordinates *GPSCoordinates
 	Records     map[string]string
 	Unknown     bool
@@ -74,17 +83,54 @@ func ReadEXIFData(file *os.File) (*ExifMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	cameraMake, err := x.Get(exif.Make)
+	var cameraMake *tiff.Tag
+	cameraMake, err = x.Get(exif.Make)
 	if err != nil {
-		return nil, err
+		if tErr, ok := err.(exif.TagNotPresentError); ok {
+			log.Printf("cannot determine camera make of %s %s", file.Name(), tErr.Error())
+			cameraMake = nil
+		} else {
+			return nil, err
+		}
 	}
-	model, err := x.Get(exif.Model)
+	var model *tiff.Tag
+	model, err = x.Get(exif.Model)
 	if err != nil {
-		return nil, err
+		if tErr, ok := err.(exif.TagNotPresentError); ok {
+			log.Printf("cannot determine camera model of %s %s", file.Name(), tErr.Error())
+			model = nil
+		} else {
+			return nil, err
+		}
 	}
-	tm, err := x.DateTime()
+	var makeStr string
+	if cameraMake == nil {
+		makeStr = NOMAKE
+	} else {
+		makeStr := strings.ReplaceAll(strings.Trim(strings.TrimSpace(cameraMake.String()), "\"'"), " ", "_")
+		if makeStr == "" {
+			makeStr = NOMAKE
+		}
+	}
+	var modelStr string
+	if model == nil {
+		modelStr = NOMODEL
+	} else {
+		modelStr = strings.ReplaceAll(strings.Trim(strings.TrimSpace(model.String()), "\"'"), " ", "_")
+		if modelStr == "" {
+			modelStr = NOMODEL
+		}
+	}
+	var tm *time.Time
+	pictureTime, err := x.DateTime()
+	tm = &pictureTime
 	if err != nil {
-		return nil, err
+		if tErr, ok := err.(exif.TagNotPresentError); ok {
+			log.Printf("cannot determine creation time of %s %s", file.Name(), tErr.Error())
+			tm = nil
+		} else {
+			return nil, err
+		}
 	}
 	var coordinates *GPSCoordinates
 	lat, long, err := x.LatLong()
@@ -97,14 +143,7 @@ func ReadEXIFData(file *os.File) (*ExifMeta, error) {
 	if err == nil {
 		coordinates = &GPSCoordinates{Latitude: float32(lat), Longitude: float32(long)}
 	}
-	makeStr := strings.TrimSpace(cameraMake.String())
-	if makeStr == "" {
-		makeStr = "no_make"
-	}
-	modelStr := strings.TrimSpace(model.String())
-	if modelStr == "" {
-		modelStr = "no_model"
-	}
+
 	exifMeta := ExifMeta{
 		Make:        makeStr,
 		Model:       modelStr,
@@ -137,11 +176,30 @@ func (e ExifReaderImpl) ReadEXIF(file string) (*ExifMeta, error) {
 }
 
 func (e ExifReaderImpl) decode(file *os.File) (int, int, string, error) {
-	config, f, err := image.DecodeConfig(file)
+	_, err := file.Seek(0, io.SeekStart)
 	if err != nil {
 		return -1, -1, "", err
 	}
-	return config.Height, config.Width, f, nil
+	ext := strings.ToLower(filepath.Ext(file.Name()))
+	switch ext {
+	case ".jpeg":
+		fallthrough
+	case ".jpg":
+		img, err := jpeg.Decode(file)
+		if err != nil {
+			return -1, -1, "err", err
+		}
+		return img.Bounds().Dy(), img.Bounds().Dx(), "jpeg", nil
+	case ".png":
+		img, err := png.Decode(file)
+		if err != nil {
+			return -1, -1, "err", err
+		}
+		return img.Bounds().Dy(), img.Bounds().Dx(), "png", nil
+	default:
+		return -1, -1, "not_implemented" + ext, nil
+	}
+
 }
 
 func NewDefaultExifReader() ExifReader {
