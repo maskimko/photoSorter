@@ -3,6 +3,7 @@ module photoSorter
 go 1.13
 
 require (
+	github.com/cenkalti/backoff/v4 v4.1.3 // indirect
 	github.com/davidrjenni/reftools v0.0.0-20210213085015-40322ffdc2e4 // indirect
 	github.com/fatih/motion v1.1.0 // indirect
 	github.com/josharian/impl v1.1.1-0.20220505013639-c6fb9ac78515 // indirect
